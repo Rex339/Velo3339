@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Multi Timezone Digital Clock</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{margin:0;padding:20px;background:#0b1220;color:#e6eef8}
+    h1{margin:0 0 12px;font-size:20px}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    select,input{padding:8px;border-radius:6px;border:1px solid #253244;background:#0f1722;color:#e6eef8}
+    button{padding:8px 12px;border-radius:6px;border:none;background:#1f6feb;color:white;cursor:pointer}
+    button.secondary{background:#334155}
+    .zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .zone{background:linear-gradient(180deg,#081225 0%,#071422 100%);border:1px solid #16202b;padding:12px;border-radius:8px;box-shadow:0 4px 14px rgba(2,6,23,.6)}
+    .zone h2{margin:0;font-size:14px}
+    .time{font-family:monospace;font-size:28px;margin:8px 0 0}
+    .sub{font-size:12px;color:#9fb0cc;margin-top:6px}
+    .zone .actions{margin-top:10px;display:flex;gap:8px}
+    .small{font-size:12px;padding:6px 8px}
+    .error{color:#ffb4b4;margin-left:8px;font-size:13px}
+  </style>
+</head>
+<body>
+  <h1>Multi Timezone Digital Clock</h1>
+
+  <div class="controls">
+    <label for="tzSelect">Add time zone:</label>
+    <select id="tzSelect"></select>
+    <input id="tzCustom" placeholder="Or type IANA zone (e.g. Pacific/Auckland)" />
+    <button id="addBtn">Add</button>
+    <button id="clearBtn" class="secondary small">Clear All</button>
+    <label style="margin-left:auto">
+      <input type="checkbox" id="hour12" /> 12-hour
+    </label>
+  </div>
+  <div id="error" class="error" aria-live="polite"></div>
+
+  <div id="zones" class="zones" aria-live="polite"></div>
+
+  <script>
+    // Common IANA time zones to populate the dropdown
+    const commonZones = [
+      "UTC",
+      "Europe/London",
+      "Europe/Paris",
+      "Europe/Berlin",
+      "America/New_York",
+      "America/Chicago",
+      "America/Denver",
+      "America/Los_Angeles",
+      "America/Sao_Paulo",
+      "America/Toronto",
+      "Asia/Kolkata",
+      "Asia/Shanghai",
+      "Asia/Tokyo",
+      "Asia/Seoul",
+      "Australia/Sydney",
+      "Pacific/Auckland",
+      "Africa/Johannesburg"
+    ];
+
+    // State: tracked zones as array of zone IDs
+    let zones = ["UTC", Intl.DateTimeFormat().resolvedOptions().timeZone]; // include local timezone by default
+    // Remove duplicates while preserving order
+    zones = [...new Set(zones)];
+
+    const tzSelect = document.getElementById('tzSelect');
+    const tzCustom = document.getElementById('tzCustom');
+    const addBtn = document.getElementById('addBtn');
+    const zonesEl = document.getElementById('zones');
+    const errorEl = document.getElementById('error');
+    const hour12Checkbox = document.getElementById('hour12');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // Populate dropdown
+    function populateSelect() {
+      tzSelect.innerHTML = '';
+      for (const z of commonZones) {
+        const opt = document.createElement('option');
+        opt.value = z;
+        opt.textContent = z;
+        tzSelect.appendChild(opt);
+      }
+      // try to add user's resolved IANA zone if it's not in the list
+      const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!commonZones.includes(local)) {
+        const opt = document.createElement('option');
+        opt.value = local;
+        opt.textContent = local + ' (local)';
+        tzSelect.insertBefore(opt, tzSelect.firstChild);
+      }
+    }
+
+    populateSelect();
+
+    // Validate a time zone by trying to format a date with it.
+    function isValidTimeZone(tz) {
+      try {
+        Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date());
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // Format date/time for zone
+    function formatForZone(date, tz, hour12) {
+      const dateFormatter = new Intl.DateTimeFormat(undefined, {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: hour12,
+      });
+      const dateOnly = new Intl.DateTimeFormat(undefined, {
+        timeZone: tz,
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      });
+      return { time: dateFormatter.format(date), date: dateOnly.format(date) };
+    }
+
+    // Render UI
+    function renderZones() {
+      zonesEl.innerHTML = '';
+      errorEl.textContent = '';
+      const hour12 = hour12Checkbox.checked;
+
+      for (const tz of zones) {
+        const card = document.createElement('div');
+        card.className = 'zone';
+        const title = document.createElement('h2');
+        title.textContent = tz;
+        card.appendChild(title);
+
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'time';
+        timeDiv.textContent = '—:—:—';
+        card.appendChild(timeDiv);
+
+        const sub = document.createElement('div');
+        sub.className = 'sub';
+        sub.textContent = '';
+        card.appendChild(sub);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'small';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => {
+          zones = zones.filter(z => z !== tz);
+          renderZones();
+        };
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'small secondary';
+        copyBtn.textContent = 'Copy Time';
+        copyBtn.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(`${timeDiv.textContent} (${tz})`);
+            copyBtn.textContent = 'Copied';
+            setTimeout(()=>copyBtn.textContent='Copy Time',800);
+          } catch (e) {
+            copyBtn.textContent = 'Copy failed';
+            setTimeout(()=>copyBtn.textContent='Copy Time',800);
+          }
+        };
+
+        actions.appendChild(removeBtn);
+        actions.appendChild(copyBtn);
+        card.appendChild(actions);
+
+        // attach elements for update loop
+        card._timeDiv = timeDiv;
+        card._sub = sub;
+        card._tz = tz;
+        zonesEl.appendChild(card);
+      }
+    }
+
+    // Add zone handler
+    addBtn.addEventListener('click', () => {
+      const selected = tzCustom.value.trim() || tzSelect.value;
+      if (!selected) return;
+      if (!isValidTimeZone(selected)) {
+        errorEl.textContent = 'Invalid IANA time zone: ' + selected;
+        return;
+      }
+      if (!zones.includes(selected)) {
+        zones.push(selected);
+        renderZones();
+      } else {
+        errorEl.textContent = 'Zone already added: ' + selected;
+      }
+      tzCustom.value = '';
+    });
+
+    // Clear all
+    clearBtn.addEventListener('click', () => {
+      zones = [];
+      renderZones();
+    });
+
+    // Toggle 12/24-hour
+    hour12Checkbox.addEventListener('change', () => updateTimes());
+
+    // Update loop (every 500ms for reasonable accuracy)
+    function updateTimes() {
+      const now = new Date();
+      const hour12 = hour12Checkbox.checked;
+      for (const card of zonesEl.children) {
+        try {
+          const tz = card._tz;
+          const formatted = formatForZone(now, tz, hour12);
+          card._timeDiv.textContent = formatted.time;
+          card._sub.textContent = formatted.date;
+        } catch (e) {
+          card._timeDiv.textContent = '—:—:—';
+          card._sub.textContent = 'Invalid zone';
+        }
+      }
+    }
+
+    // Start
+    renderZones();
+    updateTimes();
+    setInterval(updateTimes, 500);
+  </script>
+</body>
+</html>
